@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: '3'
+
+vars:
+  GREETING: "Hello, this is a NaVi-KV. Available commands are: build, run-build"
+
+tasks:
+  default:
+    desc: Print a greeting message
+    cmds:
+      - echo "{{.GREETING}}"
+    silent: true
+  build:
+    cmds:
+      - go build ./main.go
+  run-build:
+    cmds:
+      - ./main
