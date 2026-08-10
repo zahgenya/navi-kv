@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	goraft "navi-kv/m"
 )
 
 type statemachine struct {
@@ -256,7 +258,7 @@ func main() {
 
 	http.HandleFunc("/set", hs.setHandler)
 	http.HandleFunc("/get", hs.getHandler)
-	err = http.ListenAndServe(cfg.http, nil)
+	err := http.ListenAndServe(cfg.http, nil)
 	if err != nil {
 		panic(err)
 	}
