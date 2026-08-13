@@ -1,0 +1,70 @@
+x-cluster: &cluster "1,node1:3030;2,node2:3030;3,node3:3030;4,node4:3030;5,node5:3030"
+
+x-limits: &limits
+  deploy:
+    resources:
+      limits:
+        cpus: "1"
+        memory: 3G
+  environment:
+    DEBUG: ${DEBUG:-false}
+
+services:
+  node1:
+    build: .
+    container_name: kv-node1
+    hostname: node1
+    command: ["--node", "0", "--http", ":2020", "--cluster", *cluster]
+    ports:
+      - "2021:2020"
+    networks:
+      - raft
+    <<: *limits
+
+  node2:
+    build: .
+    container_name: kv-node2
+    hostname: node2
+    command: ["--node", "1", "--http", ":2020", "--cluster", *cluster]
+    ports:
+      - "2022:2020"
+    networks:
+      - raft
+    <<: *limits
+
+  node3:
+    build: .
+    container_name: kv-node3
+    hostname: node3
+    command: ["--node", "2", "--http", ":2020", "--cluster", *cluster]
+    ports:
+      - "2023:2020"
+    networks:
+      - raft
+    <<: *limits
+
+  node4:
+    build: .
+    container_name: kv-node4
+    hostname: node4
+    command: ["--node", "3", "--http", ":2020", "--cluster", *cluster]
+    ports:
+      - "2024:2020"
+    networks:
+      - raft
+    <<: *limits
+
+  node5:
+    build: .
+    container_name: kv-node5
+    hostname: node5
+    command: ["--node", "4", "--http", ":2020", "--cluster", *cluster]
+    ports:
+      - "2025:2020"
+    networks:
+      - raft
+    <<: *limits
+
+networks:
+  raft:
+    driver: bridge

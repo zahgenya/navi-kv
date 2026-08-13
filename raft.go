@@ -388,7 +388,8 @@ func (s *Server) Start() {
 }
 
 func (s *Server) resetElectionTimeout() {
-	interval := time.Duration(mathrand.Intn(s.heartbeatMs*2) + s.heartbeatMs*2)
+	interval := time.Duration(s.rand.Intn(s.heartbeatMs*2) + s.heartbeatMs*2)
+	s.electionTimeout = time.Now().Add(interval * time.Millisecond)
 	s.debugf("new interval: %s", interval*time.Millisecond)
 }
 

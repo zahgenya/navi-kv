@@ -144,7 +144,7 @@ func (hs httpServer) getHandler(w http.ResponseWriter, r *http.Request) {
 		results, err = hs.raft.Apply([][]byte{encodeCommand(c)})
 		if err == nil {
 			if len(results) != 1 {
-				err = fmt.Errorf("expected single response from Raft, got: %s", len(results))
+				err = fmt.Errorf("expected single response from Raft, got: %d", len(results))
 			} else if results[0].Error != nil {
 				err = results[0].Error
 			} else {
@@ -190,8 +190,14 @@ func getConfig() config {
 			node = os.Args[i+2]
 			cfg.index, err = strconv.Atoi(node)
 			if err != nil {
-				log.Fatal("expected $value to be a valid integer in `--node $value`, got: %s", node)
+				log.Fatalf("expected $value to be a valid integer in `--node $value`, got: %s", node)
 			}
+			i++
+			continue
+		}
+
+		if arg == "--http" {
+			cfg.http = os.Args[i+2]
 			i++
 			continue
 		}
@@ -204,7 +210,7 @@ func getConfig() config {
 				var err error
 				clusterEntry.Id, err = strconv.ParseUint(idAddress[0], 10, 64)
 				if err != nil {
-					log.Fatal("expected $id to be a valid integer in `--cluster $id,$ip`, got: %s", idAddress)
+					log.Fatalf("expected $id to be a valid integer in `--cluster $id,$ip`, got: %s", idAddress)
 				}
 
 				clusterEntry.Address = idAddress[1]
@@ -228,21 +234,18 @@ func getConfig() config {
 		log.Fatal("missing required parameter: --cluster $node1Id,$node1Address;...;$nodeNId,$nodeNAddress")
 	}
 
+	seenIds := make(map[uint64]bool)
+	for _, member := range cfg.cluster {
+		if seenIds[member.Id] {
+			log.Fatalf("duplicate id in --cluster: %d", member.Id)
+		}
+		seenIds[member.Id] = true
+	}
+
 	return cfg
 }
 
 func main() {
-	// var b [8]byte
-	// _, err := rand.Read(b[:])
-	// if err != nil {
-	// 	panic("cannot seed local random number generator")
-	// }
-	//
-	// seed := int64(binary.LittleEndian.Uint64(b[:]))
-	// nodeRand := mathrand.New(mathrand.NewSource(seed))
-	// This whole part will take a place in a Raft server itself.
-	// #TODO: add rand to server, since global random number generator is deprecated
-
 	cfg := getConfig()
 
 	var db sync.Map
@@ -252,6 +255,7 @@ func main() {
 	sm.server = cfg.index
 
 	s := goraft.NewServer(cfg.cluster, &sm, ".", cfg.index)
+	s.Debug = os.Getenv("DEBUG") == "true"
 	go s.Start()
 
 	hs := httpServer{s, &db}

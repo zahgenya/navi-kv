@@ -17,3 +17,66 @@ tasks:
   run-build:
     cmds:
       - ./main
+  docker-up:
+    desc: Start the 5-node kv-api cluster in Docker
+    cmds:
+      - docker compose up -d --build
+  docker-up-debug:
+    desc: Start the 5-node kv-api cluster in Docker with debug logs enabled
+    env:
+      DEBUG: "true"
+    cmds:
+      - docker compose up -d --build
+  docker-down:
+    desc: Stop and remove the Docker cluster
+    cmds:
+      - docker compose down
+  docker-logs:
+    desc: Follow logs from all cluster nodes
+    cmds:
+      - docker compose logs -f --timestamps
+  docker-reset:
+    desc: Stop the cluster, drop volumes, and delete any persisted .dat state files
+    cmds:
+      - docker compose down -v
+      - rm -f cmd/kv-api/*.dat
+  find-leader:
+    desc: Print the host port of the current cluster leader
+    silent: true
+    vars:
+      LEADER_PORT:
+        sh: |
+          for p in 2021 2022 2023 2024 2025; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$p/set?key=__leader_probe__&value=1")
+            if [ "$code" = "200" ]; then echo "$p"; break; fi
+          done
+    cmds:
+      - echo "{{.LEADER_PORT}}"
+  set:
+    desc: 'Set a key on the cluster leader. Usage: task set KEY=foo VALUE=bar'
+    requires:
+      vars: [KEY, VALUE]
+    vars:
+      LEADER_PORT:
+        sh: |
+          for p in 2021 2022 2023 2024 2025; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$p/set?key=__leader_probe__&value=1")
+            if [ "$code" = "200" ]; then echo "$p"; break; fi
+          done
+    cmds:
+      - 'test -n "{{.LEADER_PORT}}" || (echo "no leader found" && exit 1)'
+      - curl -s "http://localhost:{{.LEADER_PORT}}/set?key={{.KEY}}&value={{.VALUE}}"
+  get:
+    desc: 'Get a key from the cluster leader. Usage: task get KEY=foo'
+    requires:
+      vars: [KEY]
+    vars:
+      LEADER_PORT:
+        sh: |
+          for p in 2021 2022 2023 2024 2025; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "http://localhost:$p/set?key=__leader_probe__&value=1")
+            if [ "$code" = "200" ]; then echo "$p"; break; fi
+          done
+    cmds:
+      - 'test -n "{{.LEADER_PORT}}" || (echo "no leader found" && exit 1)'
+      - curl -s "http://localhost:{{.LEADER_PORT}}/get?key={{.KEY}}"

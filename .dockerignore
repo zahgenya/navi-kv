@@ -1,0 +1,3 @@
+main
+cmd/kv-api/kv-api
+*.dat
