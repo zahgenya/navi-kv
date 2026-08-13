@@ -188,7 +188,7 @@ func getConfig() config {
 		if arg == "--node" {
 			var err error
 			node = os.Args[i+2]
-			cfg.index, err = strconv.Atio(node)
+			cfg.index, err = strconv.Atoi(node)
 			if err != nil {
 				log.Fatal("expected $value to be a valid integer in `--node $value`, got: %s", node)
 			}
