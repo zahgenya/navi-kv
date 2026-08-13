@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	goraft "navi-kv/m"
+	navi "navi-kv/navi"
 )
 
 type statemachine struct {
@@ -93,7 +93,7 @@ func (s *statemachine) Apply(cmd []byte) ([]byte, error) {
 }
 
 type httpServer struct {
-	raft *goraft.Server
+	raft *navi.Server
 	db   *sync.Map
 }
 
@@ -139,7 +139,7 @@ func (hs httpServer) getHandler(w http.ResponseWriter, r *http.Request) {
 			value = []byte(v.(string))
 		}
 	} else {
-		var results []goraft.ApplyResult
+		var results []navi.ApplyResult
 
 		results, err = hs.raft.Apply([][]byte{encodeCommand(c)})
 		if err == nil {
@@ -173,7 +173,7 @@ func (hs httpServer) getHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 type config struct {
-	cluster []goraft.ClusterMember
+	cluster []navi.ClusterMember
 	index   int
 	id      string
 	address string
@@ -204,7 +204,7 @@ func getConfig() config {
 
 		if arg == "--cluster" {
 			cluster := os.Args[i+2]
-			var clusterEntry goraft.ClusterMember
+			var clusterEntry navi.ClusterMember
 			for _, part := range strings.Split(cluster, ";") {
 				idAddress := strings.Split(part, ",")
 				var err error
@@ -254,7 +254,7 @@ func main() {
 	sm.db = &db
 	sm.server = cfg.index
 
-	s := goraft.NewServer(cfg.cluster, &sm, ".", cfg.index)
+	s := navi.NewServer(cfg.cluster, &sm, ".", cfg.index)
 	s.Debug = os.Getenv("DEBUG") == "true"
 	go s.Start()
 

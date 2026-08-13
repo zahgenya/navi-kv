@@ -1,3 +1,3 @@
-module navi-kv/m
+module navi-kv
 
 go 1.26.5
