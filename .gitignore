@@ -1,0 +1,7 @@
+docker-compose.generated.yml
+
+# built binaries
+/main
+/cmd/kv-api/kv-api
+/cmd/navi-cli/navi-cli
+/kv-cli
