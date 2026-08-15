@@ -62,6 +62,7 @@ func (s *Server) requestVote() {
 
 			lastLogIndex := uint64(len(s.log) - 1)
 			lastLogTerm := s.log[len(s.log)-1].Term
+			address := s.cluster[i].Address
 
 			req := RequestVoteRequest{
 				RPCMessage: RPCMessage{
@@ -74,8 +75,8 @@ func (s *Server) requestVote() {
 			s.mu.Unlock()
 
 			var rsp RequestVoteResponse
-			ok := s.rpcCall(i, "Server.HandleRequestVoteRequest", req, &rsp)
-			if !ok {
+			if err := s.transport.RequestVote(address, req, &rsp); err != nil {
+				s.warnf("error calling RequestVote on %d: %s", s.cluster[i].Id, err)
 				return
 			}
 

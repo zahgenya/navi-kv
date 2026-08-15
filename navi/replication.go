@@ -87,6 +87,7 @@ func (s *Server) appendEntries() {
 			next := s.cluster[i].nextIndex
 			prevLogIndex := next - 1
 			prevLogTerm := s.log[prevLogIndex].Term
+			address := s.cluster[i].Address
 
 			var entries []Entry
 			if uint64(len(s.log)-1) >= s.cluster[i].nextIndex {
@@ -115,8 +116,8 @@ func (s *Server) appendEntries() {
 
 			var rsp AppendEntriesResponse
 			s.debugf("sending %d entries to %d for term %d", len(entries), s.cluster[i].Id, req.Term)
-			ok := s.rpcCall(i, "Server.HandleAppendEntriesRequest", req, &rsp)
-			if !ok {
+			if err := s.transport.AppendEntries(address, req, &rsp); err != nil {
+				s.warnf("error calling AppendEntries on %d: %s", s.cluster[i].Id, err)
 				return
 			}
 

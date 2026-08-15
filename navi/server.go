@@ -4,9 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	mathrand "math/rand"
-	"net"
-	"net/http"
-	"net/rpc"
 	"os"
 	"sync"
 	"time"
@@ -33,7 +30,6 @@ type ClusterMember struct {
 	nextIndex  uint64
 	matchIndex uint64
 	votedFor   uint64
-	rpcClient  *rpc.Client
 }
 
 type ServerState string
@@ -45,10 +41,10 @@ const (
 )
 
 type Server struct {
-	done   bool
-	server *http.Server
-	Debug  bool
-	mu     sync.Mutex
+	done      bool
+	transport Transport
+	Debug     bool
+	mu        sync.Mutex
 
 	// ---------- PERSISTANCE STATE ----------
 
@@ -81,6 +77,7 @@ func NewServer(
 	statemachine StateMachine,
 	metadataDir string,
 	clusterIndex int,
+	transport Transport,
 ) *Server {
 	// make a copy of the cluster because we will
 	// be modifying it in server
@@ -112,6 +109,7 @@ func NewServer(
 		heartbeatMs:  300,
 		mu:           sync.Mutex{},
 		rand:         nodeRand,
+		transport:    transport,
 	}
 }
 
@@ -123,17 +121,9 @@ func (s *Server) Start() {
 
 	s.restore()
 
-	rpcServer := rpc.NewServer()
-	rpcServer.Register(s)
-	l, err := net.Listen("tcp", s.address)
-	if err != nil {
+	if err := s.transport.Serve(s); err != nil {
 		panic(err)
 	}
-	mux := http.NewServeMux()
-	mux.Handle(rpc.DefaultRPCPath, rpcServer)
-
-	s.server = &http.Server{Handler: mux}
-	go s.server.Serve(l)
 
 	go func() {
 		s.mu.Lock()

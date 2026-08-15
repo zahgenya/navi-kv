@@ -254,7 +254,7 @@ func main() {
 	sm.db = &db
 	sm.server = cfg.index
 
-	s := navi.NewServer(cfg.cluster, &sm, ".", cfg.index)
+	s := navi.NewServer(cfg.cluster, &sm, ".", cfg.index, navi.NewRPCTransport())
 	s.Debug = os.Getenv("DEBUG") == "true"
 	go s.Start()
 
