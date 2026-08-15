@@ -6,7 +6,7 @@ import (
 
 func (s *Server) resetElectionTimeout() {
 	interval := time.Duration(s.rand.Intn(s.heartbeatMs*2) + s.heartbeatMs*2)
-	s.electionTimeout = time.Now().Add(interval * time.Millisecond)
+	s.electionTimeout = s.clock.Now().Add(interval * time.Millisecond)
 	s.debugf("new interval: %s", interval*time.Millisecond)
 }
 
@@ -14,7 +14,7 @@ func (s *Server) timeout() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	hasTimedOut := time.Now().After(s.electionTimeout)
+	hasTimedOut := s.clock.Now().After(s.electionTimeout)
 	if hasTimedOut {
 		s.warn("timed out, starting new election")
 		s.state = candidateState
@@ -187,6 +187,6 @@ func (s *Server) becomeLeader() {
 		s.log = append(s.log, Entry{Term: s.currentTerm, Command: nil})
 		s.persist(true, 1)
 
-		s.heartbeatTimeout = time.Now()
+		s.heartbeatTimeout = s.clock.Now()
 	}
 }

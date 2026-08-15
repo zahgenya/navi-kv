@@ -284,9 +284,9 @@ func (s *Server) heartbeat() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	timeForHeartbeat := time.Now().After(s.heartbeatTimeout)
+	timeForHeartbeat := s.clock.Now().After(s.heartbeatTimeout)
 	if timeForHeartbeat {
-		s.heartbeatTimeout = time.Now().Add(time.Duration(s.heartbeatMs) * time.Millisecond)
+		s.heartbeatTimeout = s.clock.Now().Add(time.Duration(s.heartbeatMs) * time.Millisecond)
 		s.debugf("sending heartbeat")
 		s.appendEntries()
 	}

@@ -43,6 +43,7 @@ const (
 type Server struct {
 	done      bool
 	transport Transport
+	clock     Clock
 	Debug     bool
 	mu        sync.Mutex
 
@@ -78,6 +79,7 @@ func NewServer(
 	metadataDir string,
 	clusterIndex int,
 	transport Transport,
+	clock Clock,
 ) *Server {
 	// make a copy of the cluster because we will
 	// be modifying it in server
@@ -110,6 +112,7 @@ func NewServer(
 		mu:           sync.Mutex{},
 		rand:         nodeRand,
 		transport:    transport,
+		clock:        clock,
 	}
 }
 
