@@ -6,7 +6,7 @@ import (
 
 func (s *Server) resetElectionTimeout() {
 	interval := time.Duration(s.rand.Intn(s.heartbeatMs*2) + s.heartbeatMs*2)
-	s.electionTimeout = time.Now().Add(interval * time.Millisecond)
+	s.electionTimeout = s.clock.Now().Add(interval * time.Millisecond)
 	s.debugf("new interval: %s", interval*time.Millisecond)
 }
 
@@ -14,9 +14,9 @@ func (s *Server) timeout() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	hasTimedOut := time.Now().After(s.electionTimeout)
+	hasTimedOut := s.clock.Now().After(s.electionTimeout)
 	if hasTimedOut {
-		s.debug("timed out, starting new election")
+		s.warn("timed out, starting new election")
 		s.state = candidateState
 		s.currentTerm++
 		for i := range s.cluster {
@@ -62,6 +62,7 @@ func (s *Server) requestVote() {
 
 			lastLogIndex := uint64(len(s.log) - 1)
 			lastLogTerm := s.log[len(s.log)-1].Term
+			address := s.cluster[i].Address
 
 			req := RequestVoteRequest{
 				RPCMessage: RPCMessage{
@@ -74,8 +75,8 @@ func (s *Server) requestVote() {
 			s.mu.Unlock()
 
 			var rsp RequestVoteResponse
-			ok := s.rpcCall(i, "Server.HandleRequestVoteRequest", req, &rsp)
-			if !ok {
+			if err := s.transport.RequestVote(address, req, &rsp); err != nil {
+				s.warnf("error calling RequestVote on %d: %s", s.cluster[i].Id, err)
 				return
 			}
 
@@ -106,7 +107,7 @@ func (s *Server) updateTerm(msg RPCMessage) bool {
 		s.state = followerState
 		s.setVotedFor(0)
 		transitioned = true
-		s.debug("transitioned to follower")
+		s.warn("transitioned to follower")
 		s.resetElectionTimeout()
 		s.persist(false, 0)
 	}
@@ -125,7 +126,7 @@ func (s *Server) HandleRequestVoteRequest(req RequestVoteRequest, rsp *RequestVo
 	rsp.Term = s.currentTerm
 
 	if req.Term < s.currentTerm {
-		s.debugf("not granting vote request from %d.", req.CandidateId)
+		s.warnf("not granting vote request from %d.", req.CandidateId)
 		ServerAssert(s, "VoteGranted = false", rsp.VoteGranted, false)
 		return nil
 	}
@@ -144,7 +145,7 @@ func (s *Server) HandleRequestVoteRequest(req RequestVoteRequest, rsp *RequestVo
 		s.resetElectionTimeout()
 		s.persist(false, 0)
 	} else {
-		s.debugf("not granting vote request from %d", +req.CandidateId)
+		s.warnf("not granting vote request from %d", +req.CandidateId)
 	}
 
 	return nil
@@ -186,6 +187,6 @@ func (s *Server) becomeLeader() {
 		s.log = append(s.log, Entry{Term: s.currentTerm, Command: nil})
 		s.persist(true, 1)
 
-		s.heartbeatTimeout = time.Now()
+		s.heartbeatTimeout = s.clock.Now()
 	}
 }

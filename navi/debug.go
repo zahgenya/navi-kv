@@ -5,15 +5,15 @@ import (
 	"time"
 )
 
-func (s *Server) debugmsg(msg string) string {
-	return fmt.Sprintf("%s [Id: %d, Term: %d] %s", time.Now().Format(time.RFC3339Nano), s.id, s.currentTerm, msg)
+func (s *Server) debugmsg(level, msg string) string {
+	return fmt.Sprintf("%s [%s] [Id: %d, Term: %d] %s", time.Now().Format(time.RFC3339Nano), level, s.id, s.currentTerm, msg)
 }
 
 func (s *Server) debug(msg string) {
 	if !s.Debug {
 		return
 	}
-	fmt.Println(s.debugmsg(msg))
+	fmt.Println(s.debugmsg("INFO", msg))
 }
 
 func (s *Server) debugf(msg string, args ...any) {
@@ -25,11 +25,19 @@ func (s *Server) debugf(msg string, args ...any) {
 }
 
 func (s *Server) warn(msg string) {
-	fmt.Println("[WARN] " + s.debugmsg(msg))
+	fmt.Println(s.debugmsg("WARN", msg))
 }
 
 func (s *Server) warnf(msg string, args ...any) {
-	fmt.Println(fmt.Sprintf(msg, args...))
+	s.warn(fmt.Sprintf(msg, args...))
+}
+
+func (s *Server) error(msg string) {
+	fmt.Println(s.debugmsg("ERROR", msg))
+}
+
+func (s *Server) errorf(msg string, args ...any) {
+	s.error(fmt.Sprintf(msg, args...))
 }
 
 func Assert[T comparable](msg string, a, b T) {
@@ -39,5 +47,5 @@ func Assert[T comparable](msg string, a, b T) {
 }
 
 func ServerAssert[T comparable](s *Server, msg string, a, b T) {
-	Assert(s.debugmsg(msg), a, b)
+	Assert(s.debugmsg("ERROR", msg), a, b)
 }

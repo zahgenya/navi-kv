@@ -5,8 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"os"
-	"path"
 	"time"
 )
 
@@ -42,7 +40,7 @@ func (s *Server) persist(writeLog bool, nNewEntries int) {
 		nNewEntries = len(s.log)
 	}
 
-	s.fd.Seek(0, 0)
+	s.storage.Seek(0, 0)
 
 	var page [PAGE_SIZE]byte
 	// bytes 0-8: current term
@@ -53,7 +51,7 @@ func (s *Server) persist(writeLog bool, nNewEntries int) {
 	binary.LittleEndian.PutUint64(page[:8], s.currentTerm)
 	binary.LittleEndian.PutUint64(page[8:16], s.getVotedFor())
 	binary.LittleEndian.PutUint64(page[16:24], uint64(len(s.log)))
-	n, err := s.fd.Write(page[:])
+	n, err := s.storage.Write(page[:])
 	if err != nil {
 		panic(err)
 	}
@@ -62,8 +60,8 @@ func (s *Server) persist(writeLog bool, nNewEntries int) {
 	if writeLog && nNewEntries > 0 {
 		newLogOffset := max(len(s.log)-nNewEntries, 0)
 
-		s.fd.Seek(int64(PAGE_SIZE+ENTRY_SIZE*newLogOffset), 0)
-		bw := bufio.NewWriter(s.fd)
+		s.storage.Seek(int64(PAGE_SIZE+ENTRY_SIZE*newLogOffset), 0)
+		bw := bufio.NewWriter(s.storage)
 
 		var entryBytes [ENTRY_SIZE]byte
 		for i := newLogOffset; i < len(s.log); i++ {
@@ -92,7 +90,7 @@ func (s *Server) persist(writeLog bool, nNewEntries int) {
 		}
 	}
 
-	if err = s.fd.Sync(); err != nil {
+	if err = s.storage.Sync(); err != nil {
 		panic(err)
 	}
 	s.debugf("persisted in %s. Term: %d. Log Len: %d (%d new). Voted For: %d", time.Now().Sub(t), s.currentTerm, len(s.log), nNewEntries, s.getVotedFor())
@@ -116,25 +114,22 @@ func (s *Server) restore() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.fd == nil {
+	if s.storage == nil {
 		var err error
-		s.fd, err = os.OpenFile(
-			path.Join(s.metadataDir, fmt.Sprintf("md_%d.dat", s.id)),
-			os.O_SYNC|os.O_CREATE|os.O_RDWR,
-			0o755)
+		s.storage, err = NewFileStorage(s.metadataDir, s.id)
 		if err != nil {
 			panic(err)
 		}
 	}
 
-	s.fd.Seek(0, 0)
+	s.storage.Seek(0, 0)
 
 	// Bytes 0-8: current term
 	// Bytes 8-16: voted for
 	// Bytes 16-24: log length
 	// Bytes 4096-N: log
 	var page [PAGE_SIZE]byte
-	n, err := s.fd.Read(page[:])
+	n, err := s.storage.Read(page[:])
 	if err == io.EOF {
 		s.ensureLog()
 		return
@@ -149,12 +144,12 @@ func (s *Server) restore() {
 	s.log = nil
 
 	if lenLog > 0 {
-		s.fd.Seek(int64(PAGE_SIZE), 0)
+		s.storage.Seek(int64(PAGE_SIZE), 0)
 
 		var e Entry
 		for i := 0; uint64(i) < lenLog; i++ {
 			var entryBytes [ENTRY_SIZE]byte
-			n, err := s.fd.Read(entryBytes[:])
+			n, err := s.storage.Read(entryBytes[:])
 			if err != nil {
 				panic(err)
 			}
