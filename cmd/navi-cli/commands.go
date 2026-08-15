@@ -126,12 +126,12 @@ func stopNaviCommand(m model) (tea.Model, tea.Cmd) {
 }
 
 func resetNaviCommand(m model) (tea.Model, tea.Cmd) {
-	if m.composePath == "" {
-		m.history = append(m.history, errorStyle.Render("no cluster running"))
+	path := composeFileName
+	if _, err := os.Stat(path); err != nil {
+		m.history = append(m.history, errorStyle.Render("no cluster to reset"))
 		return m, nil
 	}
 
-	path := m.composePath
 	return m, func() tea.Msg {
 		err := ComposeDown(path, true)
 		if err == nil {
