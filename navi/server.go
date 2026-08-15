@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	mathrand "math/rand"
-	"os"
 	"sync"
 	"time"
 )
@@ -61,7 +60,7 @@ type Server struct {
 	heartbeatTimeout time.Time
 	statemachine     StateMachine
 	metadataDir      string
-	fd               *os.File
+	storage          Storage
 
 	// ---------- VOLATILE STATE ----------
 
