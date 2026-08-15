@@ -16,7 +16,7 @@ func (s *Server) timeout() {
 
 	hasTimedOut := time.Now().After(s.electionTimeout)
 	if hasTimedOut {
-		s.debug("timed out, starting new election")
+		s.warn("timed out, starting new election")
 		s.state = candidateState
 		s.currentTerm++
 		for i := range s.cluster {
@@ -106,7 +106,7 @@ func (s *Server) updateTerm(msg RPCMessage) bool {
 		s.state = followerState
 		s.setVotedFor(0)
 		transitioned = true
-		s.debug("transitioned to follower")
+		s.warn("transitioned to follower")
 		s.resetElectionTimeout()
 		s.persist(false, 0)
 	}
@@ -125,7 +125,7 @@ func (s *Server) HandleRequestVoteRequest(req RequestVoteRequest, rsp *RequestVo
 	rsp.Term = s.currentTerm
 
 	if req.Term < s.currentTerm {
-		s.debugf("not granting vote request from %d.", req.CandidateId)
+		s.warnf("not granting vote request from %d.", req.CandidateId)
 		ServerAssert(s, "VoteGranted = false", rsp.VoteGranted, false)
 		return nil
 	}
@@ -144,7 +144,7 @@ func (s *Server) HandleRequestVoteRequest(req RequestVoteRequest, rsp *RequestVo
 		s.resetElectionTimeout()
 		s.persist(false, 0)
 	} else {
-		s.debugf("not granting vote request from %d", +req.CandidateId)
+		s.warnf("not granting vote request from %d", +req.CandidateId)
 	}
 
 	return nil

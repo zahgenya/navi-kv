@@ -138,7 +138,7 @@ func (s *Server) appendEntries() {
 				s.debugf("message accepted for %d. Prev Index: %d, Next Index: %d, Match Index: %d", s.cluster[i].Id, prev, s.cluster[i].nextIndex, s.cluster[i].matchIndex)
 			} else {
 				s.cluster[i].nextIndex = max(s.cluster[i].nextIndex-1, 1)
-				s.debugf("forced to go back to %d for: %d", s.cluster[i].nextIndex, s.cluster[i].Id)
+				s.warnf("forced to go back to %d for: %d", s.cluster[i].nextIndex, s.cluster[i].Id)
 			}
 		}(i)
 	}
@@ -159,12 +159,12 @@ func (s *Server) HandleAppendEntriesRequest(req AppendEntriesRequest, rsp *Appen
 	rsp.Success = false
 
 	if s.state != followerState {
-		s.debugf("non-follower cannot append entries")
+		s.warnf("non-follower cannot append entries")
 		return nil
 	}
 
 	if req.Term < s.currentTerm {
-		s.debugf("dropping request from old leader %d: term %d", req.LeaderId, req.Term)
+		s.warnf("dropping request from old leader %d: term %d", req.LeaderId, req.Term)
 		return nil
 	}
 
@@ -175,7 +175,7 @@ func (s *Server) HandleAppendEntriesRequest(req AppendEntriesRequest, rsp *Appen
 		(req.PrevLogIndex < logLen &&
 			s.log[req.PrevLogIndex].Term == req.PrevLogTerm)
 	if !validPreviousLog {
-		s.debugf("not a valid log")
+		s.warnf("not a valid log")
 		return nil
 	}
 
@@ -261,6 +261,9 @@ func (s *Server) advanceCommitIndex() {
 		if len(log.Command) != 0 {
 			s.debugf("entry applied: %d", s.lastApplied)
 			res, err := s.statemachine.Apply(log.Command)
+			if err != nil {
+				s.errorf("apply failed at index %d: %s", s.lastApplied, err)
+			}
 
 			// will be nil for follower entries and for no op entries.
 			// Not nil for all user submitted messages
