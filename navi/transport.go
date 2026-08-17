@@ -1,18 +1,25 @@
 package navi
 
 import (
+	"bufio"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/rpc"
 	"sync"
+	"time"
+)
+
+const (
+	dialTimeout = 500 * time.Millisecond
+	callTimeout = 1 * time.Second
 )
 
 type RPCMessage struct {
 	Term uint64
 }
 
-// Transport carries Raft RPCs between nodes and exposes a node's own
-// endpoints to the rest of the cluster
 type Transport interface {
 	RequestVote(address string, req RequestVoteRequest, rsp *RequestVoteResponse) error
 	AppendEntries(address string, req AppendEntriesRequest, rsp *AppendEntriesResponse) error
@@ -40,12 +47,41 @@ func (t *RPCTransport) dial(address string) (*rpc.Client, error) {
 		return c, nil
 	}
 
-	c, err := rpc.DialHTTP("tcp", address)
+	c, err := dialHTTPTimeout(address, dialTimeout)
 	if err != nil {
 		return nil, err
 	}
 	t.clients[address] = c
 	return c, nil
+}
+
+func dialHTTPTimeout(address string, timeout time.Duration) (*rpc.Client, error) {
+	conn, err := net.DialTimeout("tcp", address, timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	io.WriteString(conn, "CONNECT "+rpc.DefaultRPCPath+" HTTP/1.0\n\n")
+	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
+	if err != nil || resp.Status != "200 Connected to Go RPC" {
+		conn.Close()
+		if err == nil {
+			err = fmt.Errorf("unexpected HTTP response from %s: %s", address, resp.Status)
+		}
+		return nil, err
+	}
+
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	return rpc.NewClient(conn), nil
 }
 
 func (t *RPCTransport) call(address, method string, req, rsp any) error {
@@ -54,15 +90,22 @@ func (t *RPCTransport) call(address, method string, req, rsp any) error {
 		return err
 	}
 
-	err = c.Call(method, req, rsp)
-	if err != nil {
-		// drop the cached client so the next call redials instead of
-		// reusing a connection that just proved dead
+	call := c.Go(method, req, rsp, make(chan *rpc.Call, 1))
+	select {
+	case <-call.Done:
+		if call.Error != nil {
+			t.mu.Lock()
+			delete(t.clients, address)
+			t.mu.Unlock()
+		}
+		return call.Error
+	case <-time.After(callTimeout):
 		t.mu.Lock()
 		delete(t.clients, address)
 		t.mu.Unlock()
+		c.Close()
+		return fmt.Errorf("rpc call %s to %s timed out after %s", method, address, callTimeout)
 	}
-	return err
 }
 
 func (t *RPCTransport) RequestVote(address string, req RequestVoteRequest, rsp *RequestVoteResponse) error {

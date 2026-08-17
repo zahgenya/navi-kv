@@ -130,9 +130,6 @@ func assertCommittedLogMatches(t *testing.T, cluster []*Server) {
 	}
 }
 
-// Fault injection helpers. Require servers built with a MemoryTransport
-// sharing one MemoryNetwork (see transport_memory.go).
-
 func partitionNode(network *MemoryNetwork, s *Server) {
 	network.Partition(s.address)
 }
@@ -153,8 +150,6 @@ func delayMessages(network *MemoryNetwork, d time.Duration) {
 	network.Delay(d)
 }
 
-// pauseNode makes s stop responding to RPCs, as if hung, without killing its
-// background loop. resumeNode undoes it.
 func pauseNode(t *testing.T, s *Server) {
 	t.Helper()
 	s.transport.(*MemoryTransport).Pause()
@@ -165,9 +160,6 @@ func resumeNode(t *testing.T, s *Server) {
 	s.transport.(*MemoryTransport).Resume()
 }
 
-// killNode simulates a crash: stops the background loop and closes the
-// transport. restartNode simulates recovery on the same Server, reloading
-// state via restore().
 func killNode(s *Server) {
 	s.Stop()
 }

@@ -3,7 +3,7 @@
 version: '3'
 
 vars:
-  GREETING: "Hello, this is a NaVi-KV. Available commands are: build"
+  GREETING: "Hello, this is a NaVi-KV. Available commands are: build, test"
 
 tasks:
   default:
@@ -17,3 +17,7 @@ tasks:
   run-cli:
     cmds:
       - ./navi-cli
+  test:
+    desc: Run all tests with the race detector
+    cmds:
+      - go test ./... -race

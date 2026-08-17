@@ -155,3 +155,11 @@ func (s *Server) Start() {
 		}
 	}()
 }
+
+func (s *Server) Stop() {
+	s.mu.Lock()
+	s.done = true
+	s.mu.Unlock()
+
+	s.transport.Close()
+}

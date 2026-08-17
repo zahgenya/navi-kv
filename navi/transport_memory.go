@@ -92,9 +92,10 @@ type MemoryTransport struct {
 	network *MemoryNetwork
 	address string
 
-	mu     sync.Mutex
-	server *Server
-	paused bool
+	mu       sync.Mutex
+	server   *Server
+	paused   bool
+	resumeCh chan struct{}
 }
 
 func NewMemoryTransport(network *MemoryNetwork) *MemoryTransport {
@@ -119,13 +120,22 @@ func (t *MemoryTransport) Close() error {
 func (t *MemoryTransport) Pause() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.paused {
+		return
+	}
 	t.paused = true
+	t.resumeCh = make(chan struct{})
 }
 
 func (t *MemoryTransport) Resume() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if !t.paused {
+		return
+	}
 	t.paused = false
+	close(t.resumeCh)
+	t.resumeCh = nil
 }
 
 func (t *MemoryTransport) deliver(to string, call func(*Server) error) error {
@@ -139,12 +149,16 @@ func (t *MemoryTransport) deliver(to string, call func(*Server) error) error {
 	}
 
 	target.mu.Lock()
-	paused := target.paused
 	server := target.server
+	resumeCh := target.resumeCh
 	target.mu.Unlock()
 
-	if paused || server == nil {
+	if server == nil {
 		return ErrNoRoute
+	}
+
+	if resumeCh != nil {
+		<-resumeCh
 	}
 
 	return call(server)

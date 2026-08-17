@@ -105,7 +105,6 @@ func (m *model) appendToTab(idx int, line string) {
 }
 
 func (m *model) resizeTabs() {
-	// Leave room for the tab bar (1 line) and a blank line under it.
 	h := m.height - 2
 	if h < 0 {
 		h = 0
