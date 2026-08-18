@@ -6,3 +6,5 @@ docker-compose.generated.yml
 /cmd/navi-cli/navi-cli
 /kv-cli
 /navi-cli
+/CLAUDE.md
+/ARCHITECTURE.md

@@ -185,6 +185,11 @@ func (s *Server) HandleAppendEntriesRequest(req AppendEntriesRequest, rsp *Appen
 
 	for i := next; i < next+uint64(len(req.Entries)); i++ {
 		e := req.Entries[i-next]
+		// result must stay nil on follower entries (see advanceCommitIndex):
+		// MemoryTransport delivers Entry by direct struct copy, so without this,
+		// e.result still aliases the leader's channel and both nodes' apply
+		// loops race to send on it, permanently wedging the loser's s.mu.
+		e.result = nil
 		if i >= uint64(cap(s.log)) {
 			newTotal := next + uint64(len(req.Entries))
 			// second argument must be `i`
