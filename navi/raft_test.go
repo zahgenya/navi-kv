@@ -62,3 +62,71 @@ func TestKillLeaderElectsNewLeader(t *testing.T) {
 		t.Fatalf("expected a new leader distinct from killed leader %d, got %d", leader.id, newLeader.id)
 	}
 }
+
+func TestLogReplication(t *testing.T) {
+	cluster, _, clock := newTestCluster(t, 3)
+	leader := waitForLeader(t, cluster, clock)
+
+	command := []byte("set foo bar")
+
+	leader.mu.Lock()
+	targetIndex := uint64(len(leader.log))
+	leader.mu.Unlock()
+
+	applyDone := make(chan []ApplyResult, 1)
+	go func() {
+		results, err := leader.Apply([][]byte{command})
+		if err != nil {
+			t.Errorf("leader.Apply failed: %s", err)
+		}
+		applyDone <- results
+	}()
+
+	waitForCommit(t, cluster, clock, targetIndex)
+	waitForAllApplied(t, cluster, clock)
+
+	results := <-applyDone
+	if len(results) != 1 {
+		t.Fatalf("expected 1 apply result, got %d", len(results))
+	}
+	if results[0].Error != nil {
+		t.Fatalf("apply result error: %s", results[0].Error)
+	}
+
+	assertCommittedLogMatches(t, cluster)
+
+	for _, s := range cluster {
+		s.mu.Lock()
+		got := string(s.log[targetIndex].Command)
+		s.mu.Unlock()
+
+		if got != string(command) {
+			t.Fatalf("server %d log at index %d: got %q, want %q", s.id, targetIndex, got, command)
+		}
+	}
+
+	leader.mu.Lock()
+	leaderTerm := leader.log[targetIndex].Term
+	leader.mu.Unlock()
+
+	restored := NewServer(
+		[]ClusterMember{{Id: leader.id, Address: leader.address}},
+		noopStateMachine{},
+		"",
+		0,
+		NewMemoryTransport(NewMemoryNetwork()),
+		clock,
+	)
+	restored.storage = leader.storage
+	restored.restore()
+
+	if uint64(len(restored.log)) <= targetIndex {
+		t.Fatalf("restored log too short: len %d, want > %d", len(restored.log), targetIndex)
+	}
+	if string(restored.log[targetIndex].Command) != string(command) {
+		t.Fatalf("restored log at index %d: got %q, want %q", targetIndex, restored.log[targetIndex].Command, command)
+	}
+	if restored.log[targetIndex].Term != leaderTerm {
+		t.Fatalf("restored log at index %d: got term %d, want %d", targetIndex, restored.log[targetIndex].Term, leaderTerm)
+	}
+}
