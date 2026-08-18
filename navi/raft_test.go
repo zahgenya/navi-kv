@@ -130,3 +130,70 @@ func TestLogReplication(t *testing.T) {
 		t.Fatalf("restored log at index %d: got term %d, want %d", targetIndex, restored.log[targetIndex].Term, leaderTerm)
 	}
 }
+
+func TestClusterTolerateOneNodeDown(t *testing.T) {
+	cluster, _, clock := newTestCluster(t, 3)
+	leader := waitForLeader(t, cluster, clock)
+
+	var dead *Server
+	for _, s := range cluster {
+		if s.id != leader.id {
+			dead = s
+			break
+		}
+	}
+	killNode(dead)
+
+	remaining := make([]*Server, 0, len(cluster)-1)
+	for _, s := range cluster {
+		if s.id != dead.id {
+			remaining = append(remaining, s)
+		}
+	}
+
+	command := []byte("set foo bar")
+
+	leader.mu.Lock()
+	targetIndex := uint64(len(leader.log))
+	leader.mu.Unlock()
+
+	applyDone := make(chan []ApplyResult, 1)
+	go func() {
+		results, err := leader.Apply([][]byte{command})
+		if err != nil {
+			t.Errorf("leader.Apply failed: %s", err)
+		}
+		applyDone <- results
+	}()
+
+	waitForCommit(t, remaining, clock, targetIndex)
+	waitForAllApplied(t, remaining, clock)
+
+	results := <-applyDone
+	if len(results) != 1 {
+		t.Fatalf("expected 1 apply result, got %d", len(results))
+	}
+	if results[0].Error != nil {
+		t.Fatalf("apply result error: %s", results[0].Error)
+	}
+
+	assertCommittedLogMatches(t, remaining)
+
+	for _, s := range remaining {
+		s.mu.Lock()
+		got := string(s.log[targetIndex].Command)
+		s.mu.Unlock()
+
+		if got != string(command) {
+			t.Fatalf("server %d log at index %d: got %q, want %q", s.id, targetIndex, got, command)
+		}
+	}
+
+	dead.mu.Lock()
+	deadLogLen := uint64(len(dead.log))
+	dead.mu.Unlock()
+
+	if deadLogLen > targetIndex {
+		t.Fatalf("dead node %d should not have received entry at index %d, but its log has length %d", dead.id, targetIndex, deadLogLen)
+	}
+}
