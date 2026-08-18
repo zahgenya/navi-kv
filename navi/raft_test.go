@@ -197,3 +197,52 @@ func TestClusterTolerateOneNodeDown(t *testing.T) {
 		t.Fatalf("dead node %d should not have received entry at index %d, but its log has length %d", dead.id, targetIndex, deadLogLen)
 	}
 }
+
+func TestClusterCannotCommitWithTwoNodesDown(t *testing.T) {
+	cluster, _, clock := newTestCluster(t, 3)
+	leader := waitForLeader(t, cluster, clock)
+
+	for _, s := range cluster {
+		if s.id != leader.id {
+			killNode(s)
+		}
+	}
+
+	command := []byte("set foo bar")
+
+	leader.mu.Lock()
+	targetIndex := uint64(len(leader.log))
+	leader.mu.Unlock()
+
+	applyDone := make(chan []ApplyResult, 1)
+	go func() {
+		results, err := leader.Apply([][]byte{command})
+		if err != nil {
+			t.Errorf("leader.Apply failed: %s", err)
+		}
+		applyDone <- results
+	}()
+
+	committed := pollUntil(clock, func() bool {
+		leader.mu.Lock()
+		defer leader.mu.Unlock()
+		return leader.commitIndex >= targetIndex
+	})
+	if committed {
+		t.Fatalf("commit index reached %d with only 1/3 nodes alive; quorum should be unreachable", targetIndex)
+	}
+
+	select {
+	case <-applyDone:
+		t.Fatal("leader.Apply returned despite commit being unreachable with quorum lost")
+	default:
+	}
+
+	leader.mu.Lock()
+	commitIndex := leader.commitIndex
+	leader.mu.Unlock()
+
+	if commitIndex >= targetIndex {
+		t.Fatalf("leader commit index is %d, want < %d", commitIndex, targetIndex)
+	}
+}
