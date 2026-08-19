@@ -17,6 +17,7 @@ var helpLines = []string{
 	"status                     show leader and per-node health",
 	"set KEY VALUE              write a key on the cluster leader",
 	"get KEY [--relaxed]        read a key (relaxed = local, possibly stale)",
+	"kill-node                  pick a node to kill (raft layer only; container stays up)",
 	"help                       show this message",
 	"quit / exit                leave the CLI",
 }
@@ -56,6 +57,9 @@ func runCommand(m model, line string) (tea.Model, tea.Cmd) {
 
 	case "get":
 		return handleGet(m, args)
+
+	case "kill-node":
+		return killNodeCommand(m)
 
 	default:
 		m.history = append(m.history, errorStyle.Render(fmt.Sprintf("unknown command: %s (try `help`)", name)))
@@ -196,6 +200,22 @@ func handleSet(m model, args []string) (tea.Model, tea.Cmd) {
 			return commandResultMsg{lines: []string{errorStyle.Render(err.Error())}}
 		}
 		return commandResultMsg{lines: []string{fmt.Sprintf("ok: %s = %s", key, value)}}
+	}
+}
+
+func killNodeCommand(m model) (tea.Model, tea.Cmd) {
+	if len(m.nodePorts) == 0 {
+		m.history = append(m.history, errorStyle.Render("no cluster running"))
+		return m, nil
+	}
+
+	ports := m.nodePorts
+	return m, func() tea.Msg {
+		nodes := make([]killNodeInfo, len(ports))
+		for i, p := range ports {
+			nodes[i] = killNodeInfo{node: fmt.Sprintf("node%d", i+1), port: p, up: nodeUp(p)}
+		}
+		return killNodesLoadedMsg{nodes: nodes}
 	}
 }
 

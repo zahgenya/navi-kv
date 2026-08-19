@@ -49,6 +49,21 @@ func doSet(port int, key, value string) error {
 	return nil
 }
 
+func doKill(port int) error {
+	url := fmt.Sprintf("http://localhost:%d/kill", port)
+	resp, err := probeClient.Get(url)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("kill failed: %s: %s", resp.Status, body)
+	}
+	return nil
+}
+
 func doGet(port int, key string, relaxed bool) (string, error) {
 	url := fmt.Sprintf("http://localhost:%d/get?key=%s", port, key)
 	if relaxed {

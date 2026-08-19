@@ -172,6 +172,15 @@ func (hs httpServer) getHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HTTP endpoint to kill this node's raft layer (simulate a crash).
+// The kv-api process and this HTTP server stay up; only the raft-RPC
+// transport dies. Example usage: curl http://localhost:2020/kill
+func (hs httpServer) killHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok\n"))
+	go hs.raft.Stop()
+}
+
 type config struct {
 	cluster []navi.ClusterMember
 	index   int
@@ -262,6 +271,7 @@ func main() {
 
 	http.HandleFunc("/set", hs.setHandler)
 	http.HandleFunc("/get", hs.getHandler)
+	http.HandleFunc("/kill", hs.killHandler)
 	err := http.ListenAndServe(cfg.http, nil)
 	if err != nil {
 		panic(err)

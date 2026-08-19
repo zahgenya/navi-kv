@@ -66,6 +66,16 @@ type model struct {
 	logChan   chan logLine
 	logCtx    context.Context
 	logCancel context.CancelFunc
+
+	killSelectActive bool
+	killCursor       int
+	killNodes        []killNodeInfo
+}
+
+type killNodeInfo struct {
+	node string
+	port int
+	up   bool
 }
 
 func initialModel() model {
@@ -146,6 +156,15 @@ type commandResultMsg struct {
 	lines []string
 }
 
+type killNodesLoadedMsg struct {
+	nodes []killNodeInfo
+}
+
+type nodeKilledMsg struct {
+	node string
+	err  error
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -154,6 +173,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.killSelectActive {
+			switch msg.Type {
+			case tea.KeyUp:
+				if m.killCursor > 0 {
+					m.killCursor--
+				}
+			case tea.KeyDown:
+				if m.killCursor < len(m.killNodes)-1 {
+					m.killCursor++
+				}
+			case tea.KeyEnter:
+				target := m.killNodes[m.killCursor]
+				m.killSelectActive = false
+				return m, func() tea.Msg {
+					return nodeKilledMsg{node: target.node, err: doKill(target.port)}
+				}
+			case tea.KeyEsc, tea.KeyCtrlC:
+				m.killSelectActive = false
+				m.history = append(m.history, "kill-node cancelled")
+			}
+			return m, nil
+		}
+
 		switch msg.Type {
 		case tea.KeyCtrlC, tea.KeyEsc:
 			if m.logCancel != nil {
@@ -188,6 +230,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case commandResultMsg:
 		m.history = append(m.history, msg.lines...)
+		return m, nil
+
+	case killNodesLoadedMsg:
+		m.killSelectActive = true
+		m.killNodes = msg.nodes
+		m.killCursor = 0
+		return m, nil
+
+	case nodeKilledMsg:
+		if msg.err != nil {
+			m.history = append(m.history, errorStyle.Render(fmt.Sprintf("kill %s failed: %s", msg.node, msg.err)))
+		} else {
+			m.history = append(m.history, fmt.Sprintf("%s killed", msg.node))
+		}
 		return m, nil
 
 	case clusterStartedMsg:
@@ -266,6 +322,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
+	if m.killSelectActive {
+		s := welcomeStyle.Render("kill-node: select a node") + "\n\n"
+		for i, n := range m.killNodes {
+			state := "down"
+			if n.up {
+				state = "up"
+			}
+			line := fmt.Sprintf("%s :%d  %s", n.node, n.port, state)
+			if i == m.killCursor {
+				line = activeTabStyle.Render("> " + line)
+			} else {
+				line = inactiveTabStyle.Render("  " + line)
+			}
+			s += line + "\n"
+		}
+		s += "\n" + inactiveTabStyle.Render("up/down select  enter kill  esc cancel") + "\n"
+		return s
+	}
+
 	var bar string
 	for i, t := range m.tabs {
 		style := inactiveTabStyle
