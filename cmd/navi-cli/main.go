@@ -62,6 +62,7 @@ type model struct {
 
 	composePath string
 	nodePorts   []int
+	debug       bool
 
 	logChan   chan logLine
 	logCtx    context.Context
@@ -144,6 +145,13 @@ type logLineMsg logLine
 type clusterStartedMsg struct {
 	path  string
 	ports []int
+	debug bool
+	err   error
+}
+
+type nodeAddedMsg struct {
+	index int
+	port  int
 	err   error
 }
 
@@ -246,6 +254,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case nodeAddedMsg:
+		if msg.err != nil {
+			m.history = append(m.history, errorStyle.Render(fmt.Sprintf("add-node failed: %s", msg.err)))
+			return m, nil
+		}
+
+		m.nodePorts = append(m.nodePorts, msg.port)
+
+		node := fmt.Sprintf("node%d", msg.index)
+		m.tabs = append(m.tabs, tabModel{title: node, node: node})
+		m.resizeTabs()
+
+		if m.logCtx != nil {
+			container := fmt.Sprintf("kv-node%d", msg.index)
+			go streamContainerLogs(m.logCtx, container, node, m.logChan)
+		}
+
+		m.history = append(m.history, fmt.Sprintf("%s added: port %d", node, msg.port))
+		return m, nil
+
 	case clusterStartedMsg:
 		if msg.err != nil {
 			m.history = append(m.history, errorStyle.Render(fmt.Sprintf("start-navi failed: %s", msg.err)))
@@ -254,6 +282,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.composePath = msg.path
 		m.nodePorts = msg.ports
+		m.debug = msg.debug
 
 		m.tabs = []tabModel{{title: "Console"}, {title: "Errors/Warnings"}}
 		for i := 1; i <= len(msg.ports); i++ {

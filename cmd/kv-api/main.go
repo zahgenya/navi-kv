@@ -181,12 +181,37 @@ func (hs httpServer) killHandler(w http.ResponseWriter, r *http.Request) {
 	go hs.raft.Stop()
 }
 
+func (hs httpServer) addServerHandler(w http.ResponseWriter, r *http.Request) {
+	idStr := r.URL.Query().Get("id")
+	address := r.URL.Query().Get("address")
+
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid id: %q", idStr), http.StatusBadRequest)
+		return
+	}
+	if address == "" {
+		http.Error(w, "missing required parameter: address", http.StatusBadRequest)
+		return
+	}
+
+	if err := hs.raft.AddServer(id, address); err != nil {
+		log.Printf("could not add server %d (%s): %s", id, address, err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok\n"))
+}
+
 type config struct {
-	cluster []navi.ClusterMember
-	index   int
-	id      string
-	address string
-	http    string
+	cluster     []navi.ClusterMember
+	index       int
+	id          string
+	address     string
+	http        string
+	pendingJoin bool
 }
 
 func getConfig() config {
@@ -229,6 +254,11 @@ func getConfig() config {
 			i++
 			continue
 		}
+
+		if arg == "--pending-join" {
+			cfg.pendingJoin = true
+			continue
+		}
 	}
 
 	if node == "" {
@@ -265,6 +295,7 @@ func main() {
 
 	s := navi.NewServer(cfg.cluster, &sm, ".", cfg.index, navi.NewRPCTransport(), navi.NewRealClock())
 	s.Debug = os.Getenv("DEBUG") == "true"
+	s.Passive = cfg.pendingJoin
 	go s.Start()
 
 	hs := httpServer{s, &db}
@@ -272,6 +303,7 @@ func main() {
 	http.HandleFunc("/set", hs.setHandler)
 	http.HandleFunc("/get", hs.getHandler)
 	http.HandleFunc("/kill", hs.killHandler)
+	http.HandleFunc("/add-server", hs.addServerHandler)
 	err := http.ListenAndServe(cfg.http, nil)
 	if err != nil {
 		panic(err)
