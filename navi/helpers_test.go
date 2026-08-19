@@ -92,6 +92,62 @@ func waitForAllApplied(t *testing.T, cluster []*Server, clock *ManualClock) {
 	}
 }
 
+func submitAsync(t *testing.T, leader *Server, command []byte) (targetIndex uint64, done <-chan []ApplyResult) {
+	t.Helper()
+
+	leader.mu.Lock()
+	targetIndex = uint64(len(leader.log))
+	leader.mu.Unlock()
+
+	resultCh := make(chan []ApplyResult, 1)
+	go func() {
+		results, err := leader.Apply([][]byte{command})
+		if err != nil {
+			t.Errorf("leader.Apply failed: %s", err)
+		}
+		resultCh <- results
+	}()
+
+	return targetIndex, resultCh
+}
+
+func awaitSingleResult(t *testing.T, done <-chan []ApplyResult) ApplyResult {
+	t.Helper()
+
+	results := <-done
+	if len(results) != 1 {
+		t.Fatalf("expected 1 apply result, got %d", len(results))
+	}
+	if results[0].Error != nil {
+		t.Fatalf("apply result error: %s", results[0].Error)
+	}
+	return results[0]
+}
+
+func assertLogAt(t *testing.T, cluster []*Server, idx uint64, want []byte) {
+	t.Helper()
+
+	for _, s := range cluster {
+		s.mu.Lock()
+		got := string(s.log[idx].Command)
+		s.mu.Unlock()
+
+		if got != string(want) {
+			t.Fatalf("server %d log at index %d: got %q, want %q", s.id, idx, got, want)
+		}
+	}
+}
+
+func exclude(cluster []*Server, id uint64) []*Server {
+	remaining := make([]*Server, 0, len(cluster)-1)
+	for _, s := range cluster {
+		if s.id != id {
+			remaining = append(remaining, s)
+		}
+	}
+	return remaining
+}
+
 func assertCommittedLogMatches(t *testing.T, cluster []*Server) {
 	t.Helper()
 

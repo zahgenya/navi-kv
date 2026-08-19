@@ -49,13 +49,7 @@ func TestKillLeaderElectsNewLeader(t *testing.T) {
 
 	killNode(leader)
 
-	remaining := make([]*Server, 0, len(cluster)-1)
-	for _, s := range cluster {
-		if s.id != leader.id {
-			remaining = append(remaining, s)
-		}
-	}
-
+	remaining := exclude(cluster, leader.id)
 	newLeader := waitForLeader(t, remaining, clock)
 
 	if newLeader.id == leader.id {
@@ -69,41 +63,15 @@ func TestLogReplication(t *testing.T) {
 
 	command := []byte("set foo bar")
 
-	leader.mu.Lock()
-	targetIndex := uint64(len(leader.log))
-	leader.mu.Unlock()
-
-	applyDone := make(chan []ApplyResult, 1)
-	go func() {
-		results, err := leader.Apply([][]byte{command})
-		if err != nil {
-			t.Errorf("leader.Apply failed: %s", err)
-		}
-		applyDone <- results
-	}()
+	targetIndex, applyDone := submitAsync(t, leader, command)
 
 	waitForCommit(t, cluster, clock, targetIndex)
 	waitForAllApplied(t, cluster, clock)
 
-	results := <-applyDone
-	if len(results) != 1 {
-		t.Fatalf("expected 1 apply result, got %d", len(results))
-	}
-	if results[0].Error != nil {
-		t.Fatalf("apply result error: %s", results[0].Error)
-	}
+	awaitSingleResult(t, applyDone)
 
 	assertCommittedLogMatches(t, cluster)
-
-	for _, s := range cluster {
-		s.mu.Lock()
-		got := string(s.log[targetIndex].Command)
-		s.mu.Unlock()
-
-		if got != string(command) {
-			t.Fatalf("server %d log at index %d: got %q, want %q", s.id, targetIndex, got, command)
-		}
-	}
+	assertLogAt(t, cluster, targetIndex, command)
 
 	leader.mu.Lock()
 	leaderTerm := leader.log[targetIndex].Term
@@ -144,50 +112,18 @@ func TestClusterTolerateOneNodeDown(t *testing.T) {
 	}
 	killNode(dead)
 
-	remaining := make([]*Server, 0, len(cluster)-1)
-	for _, s := range cluster {
-		if s.id != dead.id {
-			remaining = append(remaining, s)
-		}
-	}
-
+	remaining := exclude(cluster, dead.id)
 	command := []byte("set foo bar")
 
-	leader.mu.Lock()
-	targetIndex := uint64(len(leader.log))
-	leader.mu.Unlock()
-
-	applyDone := make(chan []ApplyResult, 1)
-	go func() {
-		results, err := leader.Apply([][]byte{command})
-		if err != nil {
-			t.Errorf("leader.Apply failed: %s", err)
-		}
-		applyDone <- results
-	}()
+	targetIndex, applyDone := submitAsync(t, leader, command)
 
 	waitForCommit(t, remaining, clock, targetIndex)
 	waitForAllApplied(t, remaining, clock)
 
-	results := <-applyDone
-	if len(results) != 1 {
-		t.Fatalf("expected 1 apply result, got %d", len(results))
-	}
-	if results[0].Error != nil {
-		t.Fatalf("apply result error: %s", results[0].Error)
-	}
+	awaitSingleResult(t, applyDone)
 
 	assertCommittedLogMatches(t, remaining)
-
-	for _, s := range remaining {
-		s.mu.Lock()
-		got := string(s.log[targetIndex].Command)
-		s.mu.Unlock()
-
-		if got != string(command) {
-			t.Fatalf("server %d log at index %d: got %q, want %q", s.id, targetIndex, got, command)
-		}
-	}
+	assertLogAt(t, remaining, targetIndex, command)
 
 	dead.mu.Lock()
 	deadLogLen := uint64(len(dead.log))
@@ -210,18 +146,7 @@ func TestClusterCannotCommitWithTwoNodesDown(t *testing.T) {
 
 	command := []byte("set foo bar")
 
-	leader.mu.Lock()
-	targetIndex := uint64(len(leader.log))
-	leader.mu.Unlock()
-
-	applyDone := make(chan []ApplyResult, 1)
-	go func() {
-		results, err := leader.Apply([][]byte{command})
-		if err != nil {
-			t.Errorf("leader.Apply failed: %s", err)
-		}
-		applyDone <- results
-	}()
+	targetIndex, applyDone := submitAsync(t, leader, command)
 
 	committed := pollUntil(clock, func() bool {
 		leader.mu.Lock()
