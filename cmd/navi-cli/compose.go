@@ -16,7 +16,7 @@ const composeTemplate = `services:
     build: .
     container_name: kv-node{{ .Index }}
     hostname: node{{ .Index }}
-    command: ["--node", "{{ .NodeArg }}", "--http", ":2020", "--cluster", "{{ $.Cluster }}"]
+    command: ["--node", "{{ .NodeArg }}", "--http", ":2020", "--cluster", "{{ .Cluster }}"{{ if .PendingJoin }}, "--pending-join"{{ end }}]
     ports:
       - "{{ .HostPort }}:2020"
     networks:
@@ -36,15 +36,39 @@ networks:
 `
 
 type composeNode struct {
-	Index    int
-	NodeArg  int
-	HostPort int
+	Index       int
+	NodeArg     int
+	HostPort    int
+	Cluster     string
+	PendingJoin bool
 }
 
 type composeData struct {
-	Nodes   []composeNode
-	Cluster string
-	Debug   bool
+	Nodes []composeNode
+	Debug bool
+}
+
+func renderCompose(data composeData) error {
+	tmpl, err := template.New("compose").Parse(composeTemplate)
+	if err != nil {
+		return fmt.Errorf("could not parse compose template: %w", err)
+	}
+
+	f, err := os.Create(composeFileName)
+	if err != nil {
+		return fmt.Errorf("could not create %s: %w", composeFileName, err)
+	}
+
+	if err := tmpl.Execute(f, data); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("could not render compose template: %w", err)
+	}
+
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("could not write %s: %w", composeFileName, err)
+	}
+
+	return nil
 }
 
 func GenerateCompose(n int, debug bool) (path string, ports []int, err error) {
@@ -53,40 +77,52 @@ func GenerateCompose(n int, debug bool) (path string, ports []int, err error) {
 	}
 
 	clusterParts := make([]string, 0, n)
+	for i := 1; i <= n; i++ {
+		clusterParts = append(clusterParts, fmt.Sprintf("%d,node%d:3030", i, i))
+	}
+	cluster := strings.Join(clusterParts, ";")
+
 	nodes := make([]composeNode, 0, n)
 	for i := 1; i <= n; i++ {
 		hostPort := 2020 + i
-		clusterParts = append(clusterParts, fmt.Sprintf("%d,node%d:3030", i, i))
-		nodes = append(nodes, composeNode{Index: i, NodeArg: i - 1, HostPort: hostPort})
+		nodes = append(nodes, composeNode{Index: i, NodeArg: i - 1, HostPort: hostPort, Cluster: cluster})
 		ports = append(ports, hostPort)
 	}
 
-	data := composeData{
-		Nodes:   nodes,
-		Cluster: strings.Join(clusterParts, ";"),
-		Debug:   debug,
-	}
-
-	tmpl, err := template.New("compose").Parse(composeTemplate)
-	if err != nil {
-		return "", nil, fmt.Errorf("could not parse compose template: %w", err)
-	}
-
-	f, err := os.Create(composeFileName)
-	if err != nil {
-		return "", nil, fmt.Errorf("could not create %s: %w", composeFileName, err)
-	}
-
-	if err := tmpl.Execute(f, data); err != nil {
-		_ = f.Close()
-		return "", nil, fmt.Errorf("could not render compose template: %w", err)
-	}
-
-	if err := f.Close(); err != nil {
-		return "", nil, fmt.Errorf("could not write %s: %w", composeFileName, err)
+	if err := renderCompose(composeData{Nodes: nodes, Debug: debug}); err != nil {
+		return "", nil, err
 	}
 
 	return composeFileName, ports, nil
+}
+
+func AddComposeNode(existingN int, debug bool) (path string, newIndex, newPort int, raftAddress string, err error) {
+	if existingN < 1 {
+		return "", 0, 0, "", fmt.Errorf("no existing nodes to add to (existingN=%d)", existingN)
+	}
+
+	oldClusterParts := make([]string, 0, existingN)
+	for i := 1; i <= existingN; i++ {
+		oldClusterParts = append(oldClusterParts, fmt.Sprintf("%d,node%d:3030", i, i))
+	}
+	oldCluster := strings.Join(oldClusterParts, ";")
+
+	newIndex = existingN + 1
+	raftAddress = fmt.Sprintf("node%d:3030", newIndex)
+	newCluster := fmt.Sprintf("%d,%s", newIndex, raftAddress)
+
+	nodes := make([]composeNode, 0, newIndex)
+	for i := 1; i <= existingN; i++ {
+		nodes = append(nodes, composeNode{Index: i, NodeArg: i - 1, HostPort: 2020 + i, Cluster: oldCluster})
+	}
+	newPort = 2020 + newIndex
+	nodes = append(nodes, composeNode{Index: newIndex, NodeArg: 0, HostPort: newPort, Cluster: newCluster, PendingJoin: true})
+
+	if err := renderCompose(composeData{Nodes: nodes, Debug: debug}); err != nil {
+		return "", 0, 0, "", err
+	}
+
+	return composeFileName, newIndex, newPort, raftAddress, nil
 }
 
 func ComposeUp(path string) error {

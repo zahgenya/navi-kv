@@ -88,6 +88,7 @@ func (s *Server) appendEntries() {
 			prevLogIndex := next - 1
 			prevLogTerm := s.log[prevLogIndex].Term
 			address := s.cluster[i].Address
+			id := s.cluster[i].Id
 
 			var entries []Entry
 			if uint64(len(s.log)-1) >= s.cluster[i].nextIndex {
@@ -115,9 +116,9 @@ func (s *Server) appendEntries() {
 			s.mu.Unlock()
 
 			var rsp AppendEntriesResponse
-			s.debugf("sending %d entries to %d for term %d", len(entries), s.cluster[i].Id, req.Term)
+			s.debugf("sending %d entries to %d for term %d", len(entries), id, req.Term)
 			if err := s.transport.AppendEntries(address, req, &rsp); err != nil {
-				s.warnf("error calling AppendEntries on %d: %s", s.cluster[i].Id, err)
+				s.warnf("error calling AppendEntries on %d: %s", id, err)
 				return
 			}
 
@@ -170,6 +171,7 @@ func (s *Server) HandleAppendEntriesRequest(req AppendEntriesRequest, rsp *Appen
 	}
 
 	s.resetElectionTimeout()
+	s.Passive = false
 
 	logLen := uint64(len(s.log))
 	validPreviousLog := req.PrevLogIndex == 0 || // induction step
@@ -182,6 +184,7 @@ func (s *Server) HandleAppendEntriesRequest(req AppendEntriesRequest, rsp *Appen
 
 	next := req.PrevLogIndex + 1
 	nNewEntries := 0
+	selfVotedFor := s.getVotedFor()
 
 	for i := next; i < next+uint64(len(req.Entries)); i++ {
 		e := req.Entries[i-next]
@@ -209,6 +212,7 @@ func (s *Server) HandleAppendEntriesRequest(req AppendEntriesRequest, rsp *Appen
 			// delete the existing entry and all that follow it
 			s.log = s.log[:i]
 			ServerAssert(s, "capacity remains the same while we truncate", cap(s.log), prevCap)
+			s.rebuildClusterFromLog(selfVotedFor)
 		}
 
 		s.debugf("appending entry: %s. At index: %d", string(e.Command), len(s.log))
@@ -219,6 +223,17 @@ func (s *Server) HandleAppendEntriesRequest(req AppendEntriesRequest, rsp *Appen
 			s.log = append(s.log, e)
 			ServerAssert(s, "length is directly related to the index", uint64(len(s.log)), i+1)
 			nNewEntries++
+		}
+
+		// config changes take effect on append, not on commit (Raft section
+		// 6.2): apply to both the freshly-appended branch above and the
+		// already-present branch, idempotent by construction (mergeClusterConfig
+		// only unions), and needed because a just-truncated-then-reappended
+		// entry takes the "append" branch within this same loop iteration.
+		if isConfigChangeCommand(e.Command) {
+			incoming := decodeConfigChange(e.Command)
+			s.cluster = mergeClusterConfig(s.cluster, incoming, i+1, s.id, selfVotedFor)
+			s.clusterIndex = resolveClusterIndex(s.cluster, s.id)
 		}
 	}
 
@@ -266,9 +281,18 @@ func (s *Server) advanceCommitIndex() {
 
 		if len(log.Command) != 0 {
 			s.debugf("entry applied: %d", s.lastApplied)
-			res, err := s.statemachine.Apply(log.Command)
-			if err != nil {
-				s.errorf("apply failed at index %d: %s", s.lastApplied, err)
+
+			var res []byte
+			var err error
+			if isConfigChangeCommand(log.Command) {
+				if s.pendingConfigChangeIndex == s.lastApplied {
+					s.pendingConfigChangeIndex = 0
+				}
+			} else {
+				res, err = s.statemachine.Apply(log.Command)
+				if err != nil {
+					s.errorf("apply failed at index %d: %s", s.lastApplied, err)
+				}
 			}
 
 			// will be nil for follower entries and for no op entries.

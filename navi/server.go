@@ -61,15 +61,21 @@ type Server struct {
 	statemachine     StateMachine
 	metadataDir      string
 	storage          Storage
+	baseCluster      []ClusterMember // founding members, captured once; used to rebuild cluster after truncation/restore
+
+	// Passive keeps a freshly-started, not-yet-added node from starting its
+	// own elections while it waits to be added to a real cluster
+	Passive bool
 
 	// ---------- VOLATILE STATE ----------
 
-	commitIndex  uint64
-	lastApplied  uint64
-	state        ServerState
-	cluster      []ClusterMember
-	clusterIndex int
-	rand         *mathrand.Rand
+	commitIndex              uint64
+	lastApplied              uint64
+	state                    ServerState
+	cluster                  []ClusterMember
+	clusterIndex             int
+	pendingConfigChangeIndex uint64 // 0 = no config change in flight; else log index of an appended-but-uncommitted config-change entry (leader-only, not persisted, like commitIndex/lastApplied)
+	rand                     *mathrand.Rand
 }
 
 func NewServer(
@@ -100,10 +106,14 @@ func NewServer(
 
 	nodeRand := mathrand.New(mathrand.NewSource(seed))
 
+	baseCluster := make([]ClusterMember, len(cluster))
+	copy(baseCluster, cluster)
+
 	return &Server{
 		id:           cluster[clusterIndex].Id,
 		address:      cluster[clusterIndex].Address,
 		cluster:      cluster,
+		baseCluster:  baseCluster,
 		statemachine: statemachine,
 		metadataDir:  metadataDir,
 		clusterIndex: clusterIndex,

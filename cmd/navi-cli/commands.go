@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -17,6 +18,8 @@ var helpLines = []string{
 	"status                     show leader and per-node health",
 	"set KEY VALUE              write a key on the cluster leader",
 	"get KEY [--relaxed]        read a key (relaxed = local, possibly stale)",
+	"kill-node                  pick a node to kill (raft layer only; container stays up)",
+	"add-node                   spawn a new container and add it to the running cluster",
 	"help                       show this message",
 	"quit / exit                leave the CLI",
 }
@@ -56,6 +59,12 @@ func runCommand(m model, line string) (tea.Model, tea.Cmd) {
 
 	case "get":
 		return handleGet(m, args)
+
+	case "kill-node":
+		return killNodeCommand(m)
+
+	case "add-node":
+		return addNodeCommand(m)
 
 	default:
 		m.history = append(m.history, errorStyle.Render(fmt.Sprintf("unknown command: %s (try `help`)", name)))
@@ -102,7 +111,7 @@ func startNaviCommand(m model, args []string) (tea.Model, tea.Cmd) {
 		if err == nil {
 			err = ComposeUp(path)
 		}
-		return clusterStartedMsg{path: path, ports: ports, err: err}
+		return clusterStartedMsg{path: path, ports: ports, debug: debug, err: err}
 	}
 }
 
@@ -196,6 +205,63 @@ func handleSet(m model, args []string) (tea.Model, tea.Cmd) {
 			return commandResultMsg{lines: []string{errorStyle.Render(err.Error())}}
 		}
 		return commandResultMsg{lines: []string{fmt.Sprintf("ok: %s = %s", key, value)}}
+	}
+}
+
+func killNodeCommand(m model) (tea.Model, tea.Cmd) {
+	if len(m.nodePorts) == 0 {
+		m.history = append(m.history, errorStyle.Render("no cluster running"))
+		return m, nil
+	}
+
+	ports := m.nodePorts
+	return m, func() tea.Msg {
+		nodes := make([]killNodeInfo, len(ports))
+		for i, p := range ports {
+			nodes[i] = killNodeInfo{node: fmt.Sprintf("node%d", i+1), port: p, up: nodeUp(p)}
+		}
+		return killNodesLoadedMsg{nodes: nodes}
+	}
+}
+
+func addNodeCommand(m model) (tea.Model, tea.Cmd) {
+	if len(m.nodePorts) == 0 {
+		m.history = append(m.history, errorStyle.Render("no cluster running"))
+		return m, nil
+	}
+
+	ports := m.nodePorts
+	debug := m.debug
+	m.history = append(m.history, "adding new node...")
+
+	return m, func() tea.Msg {
+		if _, err := probeLeaderWithRetry(ports, 10*time.Second); err != nil {
+			return nodeAddedMsg{err: err}
+		}
+
+		path, newIndex, newPort, raftAddress, err := AddComposeNode(len(ports), debug)
+		if err != nil {
+			return nodeAddedMsg{err: err}
+		}
+
+		if err := ComposeUp(path); err != nil {
+			return nodeAddedMsg{err: err}
+		}
+
+		if !waitForNodeUp(newPort, 15*time.Second) {
+			return nodeAddedMsg{err: fmt.Errorf("node%d did not come up on port %d", newIndex, newPort)}
+		}
+
+		leader, err := probeLeaderWithRetry(ports, 10*time.Second)
+		if err != nil {
+			return nodeAddedMsg{err: err}
+		}
+
+		if err := doAddServer(leader, uint64(newIndex), raftAddress); err != nil {
+			return nodeAddedMsg{err: err}
+		}
+
+		return nodeAddedMsg{index: newIndex, port: newPort}
 	}
 }
 
