@@ -132,6 +132,7 @@ func (s *Server) restore() {
 	n, err := s.storage.Read(page[:])
 	if err == io.EOF {
 		s.ensureLog()
+		s.rebuildClusterFromLog(s.getVotedFor())
 		return
 	} else if err != nil {
 		panic(err)
@@ -166,6 +167,7 @@ func (s *Server) restore() {
 	}
 
 	s.ensureLog()
+	s.rebuildClusterFromLog(s.getVotedFor())
 }
 
 func (s *Server) ensureLog() {

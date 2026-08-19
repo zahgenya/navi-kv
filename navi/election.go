@@ -14,6 +14,10 @@ func (s *Server) timeout() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.Passive {
+		return
+	}
+
 	hasTimedOut := s.clock.Now().After(s.electionTimeout)
 	if hasTimedOut {
 		s.warn("timed out, starting new election")
@@ -63,6 +67,7 @@ func (s *Server) requestVote() {
 			lastLogIndex := uint64(len(s.log) - 1)
 			lastLogTerm := s.log[len(s.log)-1].Term
 			address := s.cluster[i].Address
+			id := s.cluster[i].Id
 
 			req := RequestVoteRequest{
 				RPCMessage: RPCMessage{
@@ -76,7 +81,7 @@ func (s *Server) requestVote() {
 
 			var rsp RequestVoteResponse
 			if err := s.transport.RequestVote(address, req, &rsp); err != nil {
-				s.warnf("error calling RequestVote on %d: %s", s.cluster[i].Id, err)
+				s.warnf("error calling RequestVote on %d: %s", id, err)
 				return
 			}
 
@@ -106,6 +111,7 @@ func (s *Server) updateTerm(msg RPCMessage) bool {
 		s.currentTerm = msg.Term
 		s.state = followerState
 		s.setVotedFor(0)
+		s.pendingConfigChangeIndex = 0
 		transitioned = true
 		s.warn("transitioned to follower")
 		s.resetElectionTimeout()
