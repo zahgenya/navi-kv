@@ -84,6 +84,14 @@ func dialHTTPTimeout(address string, timeout time.Duration) (*rpc.Client, error)
 	return rpc.NewClient(conn), nil
 }
 
+// evict drops c from the client cache and closes it.
+func (t *RPCTransport) evict(address string, c *rpc.Client) {
+	t.mu.Lock()
+	delete(t.clients, address)
+	t.mu.Unlock()
+	c.Close()
+}
+
 func (t *RPCTransport) call(address, method string, req, rsp any) error {
 	c, err := t.dial(address)
 	if err != nil {
@@ -94,16 +102,11 @@ func (t *RPCTransport) call(address, method string, req, rsp any) error {
 	select {
 	case <-call.Done:
 		if call.Error != nil {
-			t.mu.Lock()
-			delete(t.clients, address)
-			t.mu.Unlock()
+			t.evict(address, c)
 		}
 		return call.Error
 	case <-time.After(callTimeout):
-		t.mu.Lock()
-		delete(t.clients, address)
-		t.mu.Unlock()
-		c.Close()
+		t.evict(address, c)
 		return fmt.Errorf("rpc call %s to %s timed out after %s", method, address, callTimeout)
 	}
 }
