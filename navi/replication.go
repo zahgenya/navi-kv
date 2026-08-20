@@ -8,6 +8,15 @@ import (
 
 var ErrApplyToLeader = errors.New("cannot apply message to follower, apply to leader")
 
+// appendLocked appends command as a new entry at the current term and
+// returns its result channel and log index. Caller must hold s.mu and have
+// already confirmed s.state == leaderState.
+func (s *Server) appendLocked(command []byte) (chan ApplyResult, uint64) {
+	ch := make(chan ApplyResult)
+	s.log = append(s.log, Entry{Term: s.currentTerm, Command: command, result: ch})
+	return ch, uint64(len(s.log) - 1)
+}
+
 func (s *Server) Apply(commands [][]byte) ([]ApplyResult, error) {
 	s.mu.Lock()
 	if s.state != leaderState {
@@ -18,12 +27,7 @@ func (s *Server) Apply(commands [][]byte) ([]ApplyResult, error) {
 
 	resultChans := make([]chan ApplyResult, len(commands))
 	for i, command := range commands {
-		resultChans[i] = make(chan ApplyResult)
-		s.log = append(s.log, Entry{
-			Term:    s.currentTerm,
-			Command: command,
-			result:  resultChans[i],
-		})
+		resultChans[i], _ = s.appendLocked(command)
 	}
 
 	s.persist(true, len(commands))

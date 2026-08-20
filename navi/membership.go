@@ -162,12 +162,10 @@ func (s *Server) AddServer(id uint64, address string) error {
 		return err
 	}
 
-	resultCh := make(chan ApplyResult)
-	s.log = append(s.log, Entry{Term: s.currentTerm, Command: payload, result: resultCh})
-	newIndex := uint64(len(s.log) - 1)
+	resultCh, newIndex := s.appendLocked(payload)
 
 	selfVotedFor := s.getVotedFor()
-	s.cluster = mergeClusterConfig(s.cluster, newMembers, uint64(len(s.log)), s.id, selfVotedFor)
+	s.cluster = mergeClusterConfig(s.cluster, newMembers, newIndex+1, s.id, selfVotedFor)
 	s.clusterIndex = resolveClusterIndex(s.cluster, s.id)
 	s.pendingConfigChangeIndex = newIndex
 
