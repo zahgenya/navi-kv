@@ -29,8 +29,6 @@ Docker Compose.
 - **Docker + Docker Compose** — local multi-node clusters, driven by `navi-cli`
   via a generated compose file (`docker-compose.generated.yml`)
 - [**Task**](https://taskfile.dev) (`go-task`) — build/test/run commands
-- `golangci-lint` (`staticcheck`, `errcheck`, `govet`) — not wired into CI (there is
-  none in this repo) run manually
 
 ## Architecture
 
