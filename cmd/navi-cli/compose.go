@@ -71,16 +71,28 @@ func renderCompose(data composeData) error {
 	return nil
 }
 
+func raftAddress(index int) string {
+	return fmt.Sprintf("node%d:3030", index)
+}
+
+func clusterSpec(index int) string {
+	return fmt.Sprintf("%d,%s", index, raftAddress(index))
+}
+
+func clusterString(n int) string {
+	parts := make([]string, 0, n)
+	for i := 1; i <= n; i++ {
+		parts = append(parts, clusterSpec(i))
+	}
+	return strings.Join(parts, ";")
+}
+
 func GenerateCompose(n int, debug bool) (path string, ports []int, err error) {
 	if n < 1 {
 		return "", nil, fmt.Errorf("node count must be at least 1, got %d", n)
 	}
 
-	clusterParts := make([]string, 0, n)
-	for i := 1; i <= n; i++ {
-		clusterParts = append(clusterParts, fmt.Sprintf("%d,node%d:3030", i, i))
-	}
-	cluster := strings.Join(clusterParts, ";")
+	cluster := clusterString(n)
 
 	nodes := make([]composeNode, 0, n)
 	for i := 1; i <= n; i++ {
@@ -96,20 +108,16 @@ func GenerateCompose(n int, debug bool) (path string, ports []int, err error) {
 	return composeFileName, ports, nil
 }
 
-func AddComposeNode(existingN int, debug bool) (path string, newIndex, newPort int, raftAddress string, err error) {
+func AddComposeNode(existingN int, debug bool) (path string, newIndex, newPort int, nodeAddress string, err error) {
 	if existingN < 1 {
 		return "", 0, 0, "", fmt.Errorf("no existing nodes to add to (existingN=%d)", existingN)
 	}
 
-	oldClusterParts := make([]string, 0, existingN)
-	for i := 1; i <= existingN; i++ {
-		oldClusterParts = append(oldClusterParts, fmt.Sprintf("%d,node%d:3030", i, i))
-	}
-	oldCluster := strings.Join(oldClusterParts, ";")
+	oldCluster := clusterString(existingN)
 
 	newIndex = existingN + 1
-	raftAddress = fmt.Sprintf("node%d:3030", newIndex)
-	newCluster := fmt.Sprintf("%d,%s", newIndex, raftAddress)
+	nodeAddress = raftAddress(newIndex)
+	newCluster := clusterSpec(newIndex)
 
 	nodes := make([]composeNode, 0, newIndex)
 	for i := 1; i <= existingN; i++ {
@@ -122,7 +130,7 @@ func AddComposeNode(existingN int, debug bool) (path string, newIndex, newPort i
 		return "", 0, 0, "", err
 	}
 
-	return composeFileName, newIndex, newPort, raftAddress, nil
+	return composeFileName, newIndex, newPort, nodeAddress, nil
 }
 
 func ComposeUp(path string) error {

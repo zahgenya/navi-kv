@@ -47,16 +47,39 @@ const asciiLogo = `
 var welcomeMessage = fmt.Sprintf("NaVi CLI\nRaft conseunsus implementation\n%s\ntype `help` for commands, or `quit` to exit", asciiLogo)
 
 type tabModel struct {
-	title   string
-	node    string
-	content string
-	lines   []string
-	vp      viewport.Model
+	title string
+	node  string
+	lines []string
+	vp    viewport.Model
 
 	isSearch  bool
 	sourceTab int
 	query     string
 }
+
+func (t *tabModel) setContent() {
+	t.vp.SetContent(renderTabLines(t.lines, t.query))
+	t.vp.GotoBottom()
+}
+
+func renderTabLines(lines []string, query string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	rendered := make([]string, len(lines))
+	for i, l := range lines {
+		rendered[i] = renderLine(l, query)
+	}
+	return strings.Join(rendered, "\n") + "\n"
+}
+
+type uiMode int
+
+const (
+	modeNormal uiMode = iota
+	modeKillSelect
+	modeSearchInput
+)
 
 type model struct {
 	input   textinput.Model
@@ -75,12 +98,12 @@ type model struct {
 	logCtx    context.Context
 	logCancel context.CancelFunc
 
-	killSelectActive bool
-	killCursor       int
-	killNodes        []killNodeInfo
+	mode uiMode
 
-	searchActive bool
-	searchInput  textinput.Model
+	killCursor int
+	killNodes  []killNodeInfo
+
+	searchInput textinput.Model
 }
 
 type killNodeInfo struct {
@@ -126,9 +149,7 @@ func (m *model) appendToTab(idx int, line string) {
 		return
 	}
 	m.tabs[idx].lines = append(m.tabs[idx].lines, line)
-	m.tabs[idx].content += line + "\n"
-	m.tabs[idx].vp.SetContent(m.tabs[idx].content)
-	m.tabs[idx].vp.GotoBottom()
+	m.tabs[idx].setContent()
 
 	m.propagateToSearchTabs(idx, line)
 }
@@ -144,9 +165,7 @@ func (m *model) propagateToSearchTabs(idx int, line string) {
 			continue
 		}
 		t.lines = append(t.lines, line)
-		t.content += renderLine(line, t.query) + "\n"
-		t.vp.SetContent(t.content)
-		t.vp.GotoBottom()
+		t.setContent()
 	}
 }
 
@@ -195,15 +214,11 @@ func (m *model) openSearchTab(source int, query string) {
 		query:     query,
 	}
 	q := strings.ToLower(query)
-	var b strings.Builder
 	for _, l := range m.tabs[source].lines {
 		if strings.Contains(strings.ToLower(l), q) {
 			nt.lines = append(nt.lines, l)
-			b.WriteString(renderLine(l, query))
-			b.WriteString("\n")
 		}
 	}
-	nt.content = b.String()
 
 	tabs := make([]tabModel, 0, len(m.tabs)+1)
 	tabs = append(tabs, m.tabs[:insertAt]...)
@@ -213,8 +228,7 @@ func (m *model) openSearchTab(source int, query string) {
 
 	m.activeTab = insertAt
 	m.resizeTabs()
-	m.tabs[insertAt].vp.SetContent(nt.content)
-	m.tabs[insertAt].vp.GotoBottom()
+	m.tabs[insertAt].setContent()
 }
 
 // closeSearchTab removes a search split tab and returns focus to its source.
@@ -310,45 +324,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		if m.killSelectActive {
-			switch msg.Type {
-			case tea.KeyUp:
-				if m.killCursor > 0 {
-					m.killCursor--
-				}
-			case tea.KeyDown:
-				if m.killCursor < len(m.killNodes)-1 {
-					m.killCursor++
-				}
-			case tea.KeyEnter:
-				target := m.killNodes[m.killCursor]
-				m.killSelectActive = false
-				return m, func() tea.Msg {
-					return nodeKilledMsg{node: target.node, err: doKill(target.port)}
-				}
-			case tea.KeyEsc, tea.KeyCtrlC:
-				m.killSelectActive = false
-				m.history = append(m.history, "kill-node cancelled")
-			}
-			return m, nil
-		}
-
-		if m.searchActive {
-			switch msg.Type {
-			case tea.KeyEnter:
-				m.searchActive = false
-				query := m.searchInput.Value()
-				m.searchInput.SetValue("")
-				m.openSearchTab(m.activeTab, query)
-				return m, nil
-			case tea.KeyEsc, tea.KeyCtrlC:
-				m.searchActive = false
-				m.searchInput.SetValue("")
-				return m, nil
-			}
-			var cmd tea.Cmd
-			m.searchInput, cmd = m.searchInput.Update(msg)
-			return m, cmd
+		switch m.mode {
+		case modeKillSelect:
+			return m.updateKillSelect(msg)
+		case modeSearchInput:
+			return m.updateSearchInput(msg)
 		}
 
 		if m.activeTab != 0 && m.tabs[m.activeTab].isSearch && msg.Type == tea.KeyEsc {
@@ -372,7 +352,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.activeTab != 0 {
 			if msg.String() == "/" {
-				m.searchActive = true
+				m.mode = modeSearchInput
 				m.searchInput.SetValue("")
 				m.searchInput.Focus()
 				return m, textinput.Blink
@@ -399,7 +379,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case killNodesLoadedMsg:
-		m.killSelectActive = true
+		m.mode = modeKillSelect
 		m.killNodes = msg.nodes
 		m.killCursor = 0
 		return m, nil
@@ -509,23 +489,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	if m.killSelectActive {
-		s := welcomeStyle.Render("kill-node: select a node") + "\n\n"
-		for i, n := range m.killNodes {
-			state := "down"
-			if n.up {
-				state = "up"
-			}
-			line := fmt.Sprintf("%s :%d  %s", n.node, n.port, state)
-			if i == m.killCursor {
-				line = activeTabStyle.Render("> " + line)
-			} else {
-				line = inactiveTabStyle.Render("  " + line)
-			}
-			s += line + "\n"
-		}
-		s += "\n" + inactiveTabStyle.Render("up/down select  enter kill  esc cancel") + "\n"
-		return s
+	if m.mode == modeKillSelect {
+		return m.viewKillSelect()
 	}
 
 	var bar string
@@ -540,7 +505,7 @@ func (m model) View() string {
 	if m.activeTab != 0 {
 		statusLine := ""
 		switch {
-		case m.searchActive:
+		case m.mode == modeSearchInput:
 			statusLine = m.searchInput.View()
 		case m.tabs[m.activeTab].isSearch:
 			statusLine = inactiveTabStyle.Render(fmt.Sprintf("filtered on /%s  (%d matches)  esc close",

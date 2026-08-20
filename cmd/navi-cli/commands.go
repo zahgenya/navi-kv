@@ -154,9 +154,17 @@ func resetNaviCommand(m model) (tea.Model, tea.Cmd) {
 	}
 }
 
-func statusCommand(m model) (tea.Model, tea.Cmd) {
+func requireRunningCluster(m model) (model, bool) {
 	if len(m.nodePorts) == 0 {
 		m.history = append(m.history, errorStyle.Render("no cluster running"))
+		return m, false
+	}
+	return m, true
+}
+
+func statusCommand(m model) (tea.Model, tea.Cmd) {
+	m, ok := requireRunningCluster(m)
+	if !ok {
 		return m, nil
 	}
 
@@ -185,8 +193,8 @@ func statusCommand(m model) (tea.Model, tea.Cmd) {
 }
 
 func handleSet(m model, args []string) (tea.Model, tea.Cmd) {
-	if len(m.nodePorts) == 0 {
-		m.history = append(m.history, errorStyle.Render("no cluster running"))
+	m, ok := requireRunningCluster(m)
+	if !ok {
 		return m, nil
 	}
 	if len(args) != 2 {
@@ -209,8 +217,8 @@ func handleSet(m model, args []string) (tea.Model, tea.Cmd) {
 }
 
 func killNodeCommand(m model) (tea.Model, tea.Cmd) {
-	if len(m.nodePorts) == 0 {
-		m.history = append(m.history, errorStyle.Render("no cluster running"))
+	m, ok := requireRunningCluster(m)
+	if !ok {
 		return m, nil
 	}
 
@@ -225,8 +233,8 @@ func killNodeCommand(m model) (tea.Model, tea.Cmd) {
 }
 
 func addNodeCommand(m model) (tea.Model, tea.Cmd) {
-	if len(m.nodePorts) == 0 {
-		m.history = append(m.history, errorStyle.Render("no cluster running"))
+	m, ok := requireRunningCluster(m)
+	if !ok {
 		return m, nil
 	}
 
@@ -266,8 +274,8 @@ func addNodeCommand(m model) (tea.Model, tea.Cmd) {
 }
 
 func handleGet(m model, args []string) (tea.Model, tea.Cmd) {
-	if len(m.nodePorts) == 0 {
-		m.history = append(m.history, errorStyle.Render("no cluster running"))
+	m, ok := requireRunningCluster(m)
+	if !ok {
 		return m, nil
 	}
 	if len(args) < 1 {
